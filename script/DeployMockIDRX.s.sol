@@ -14,16 +14,16 @@ contract DeployMockIDRX is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy the MockIDRX contract
-        MockIDRX mockIDRX = new MockIDRX();
+        MockIDRX mockIdrx = new MockIDRX();
 
         // Optional: Mint initial supply to deployer
         // mockIDRX.mint(msg.sender, 1000000); // 1,000,000 tokens (with 2 decimals)
 
         vm.stopBroadcast();
 
-        console.log("MockIDRX deployed at:", address(mockIDRX));
-        console.log("Token Name:", mockIDRX.name());
-        console.log("Token Symbol:", mockIDRX.symbol());
-        console.log("Token Decimals:", mockIDRX.decimals());
+        console.log("MockIDRX deployed at:", address(mockIdrx));
+        console.log("Token Name:", mockIdrx.name());
+        console.log("Token Symbol:", mockIdrx.symbol());
+        console.log("Token Decimals:", mockIdrx.decimals());
     }
 }

@@ -48,7 +48,8 @@ contract MockIDRXTest is Test {
 
     function test_Transfer() public {
         vm.startPrank(user1);
-        token.transfer(user2, 100);
+        bool success = token.transfer(user2, 100);
+        assertTrue(success);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), 900);
@@ -79,8 +80,14 @@ contract MockIDRXTest is Test {
         vm.stopPrank();
 
         vm.startPrank(user1);
-        vm.expectRevert();
-        token.transfer(user2, 100);
+        // Transfer should revert when paused
+        try token.transfer(user2, 100) {
+            assertTrue(false, "Expected revert but transfer succeeded");
+        } catch Error(string memory reason) {
+            assertTrue(true, "Transfer reverted as expected");
+        } catch {
+            assertTrue(true, "Transfer reverted as expected");
+        }
         vm.stopPrank();
     }
 
@@ -93,7 +100,8 @@ contract MockIDRXTest is Test {
 
         // Should be able to transfer now
         vm.startPrank(user1);
-        token.transfer(user2, 100);
+        bool success = token.transfer(user2, 100);
+        assertTrue(success);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), 900);
