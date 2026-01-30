@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.29;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
@@ -20,7 +20,13 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  *
  * This is a comprehensive mock token suitable for testing complex DeFi scenarios.
  */
-contract MockIDRX is ERC20, ERC20Permit, ERC20Burnable, ERC20Pausable, AccessControl {
+contract MockIDRX is
+    ERC20,
+    ERC20Permit,
+    ERC20Burnable,
+    ERC20Pausable,
+    AccessControl
+{
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
@@ -81,7 +87,11 @@ contract MockIDRX is ERC20, ERC20Permit, ERC20Burnable, ERC20Pausable, AccessCon
      *
      * To learn more about hooks, head to xref:ROOT:extending-contracts.adoc#using-hooks[Using Hooks].
      */
-    function _update(address from, address to, uint256 amount) internal override(ERC20, ERC20Pausable) {
+    function _update(
+        address from,
+        address to,
+        uint256 amount
+    ) internal override(ERC20, ERC20Pausable) {
         super._update(from, to, amount);
     }
 }
