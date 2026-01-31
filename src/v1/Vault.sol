@@ -8,27 +8,24 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title Vault
- * @dev Secure escrow contract for holding booking funds
+ * @dev Secure escrow contract for holding COMMITMENT_FEE booking funds
  *
  * Features:
- * - Escrow deposits for PAID and COMMITMENT_FEE bookings
+ * - Escrow deposits for COMMITMENT_FEE bookings only
  * - Time-based locks for payment releases
- * - Platform fee distribution (5% for PAID, 10% for no-show)
+ * - Platform fee distribution (10% for no-show)
  * - Pull-over-push payment pattern (reentrancy safe)
  * - Role-based access control
  * - Emergency withdrawal mechanisms
  *
  * This contract implements a secure escrow system that holds funds
- * until specific conditions are met (session completion, time expiry).
+ * until specific conditions are met (session completion, no-show determination).
  */
 contract Vault is ReentrancyGuard, AccessControl {
     using SafeERC20 for IERC20;
 
-    /// @notice Platform fee percentage for PAID bookings (5%)
-    uint256 public constant PLATFORM_FEE_PERCENT_PAID = 5;
-
     /// @notice Platform fee percentage for COMMITMENT_FEE no-shows (10%)
-    uint256 public constant PLATFORM_FEE_PERCENT_COMMIT = 10;
+    uint256 public constant PLATFORM_FEE_PERCENT = 10;
 
     /// @notice Mentor percentage for no-show (90%)
     uint256 public constant MENTOR_PERCENT_NO_SHOW = 90;
@@ -43,6 +40,8 @@ contract Vault is ReentrancyGuard, AccessControl {
     bytes32 public constant PLATFORM_ADMIN_ROLE = keccak256("PLATFORM_ADMIN_ROLE");
 
     /// @notice Escrow state for each booking
+    /// All bookings are COMMITMENT_FEE type - refundable commitment fee
+    /// that is held in escrow until session completion or no-show determination
     struct BookingEscrow {
         uint256 amount;              // Total deposited amount
         uint256 mentorAmount;        // Amount for mentor (if applicable)
@@ -53,13 +52,6 @@ contract Vault is ReentrancyGuard, AccessControl {
         address mentor;             // Mentor address
         bool claimed;               // Whether funds have been claimed
         bool active;               // Whether escrow is active
-        BookingType bookingType;    // Type of booking
-    }
-
-    /// @notice Booking type enum
-    enum BookingType {
-        PAID,                      // Mentor gets paid
-        COMMITMENT_FEE             // Refundable commitment fee
     }
 
     /// @notice Emitted when an escrow is created
@@ -67,8 +59,7 @@ contract Vault is ReentrancyGuard, AccessControl {
         uint256 indexed bookingId,
         address indexed mentee,
         address indexed mentor,
-        uint256 amount,
-        BookingType bookingType
+        uint256 amount
     );
 
     /// @notice Emitted when mentor payment is released
@@ -140,7 +131,6 @@ contract Vault is ReentrancyGuard, AccessControl {
     error NoMentorPayment();
     error SessionNotStarted();
     error NotMentee();
-    error WrongBookingType();
     error NoRefundAvailable();
     error BookingNotClaimed();
     error PlatformFeeAlreadyClaimed();
@@ -171,12 +161,11 @@ contract Vault is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @dev Creates an escrow for a booking
+     * @dev Creates an escrow for a COMMITMENT_FEE booking
      * @param bookingId Unique booking identifier
      * @param mentee Address of the mentee
      * @param mentor Address of the mentor
      * @param amount Amount to escrow
-     * @param bookingType Type of booking (PAID or COMMITMENT_FEE)
      * @param sessionTime Timestamp when session occurs
      */
     function createEscrow(
@@ -184,7 +173,6 @@ contract Vault is ReentrancyGuard, AccessControl {
         address mentee,
         address mentor,
         uint256 amount,
-        BookingType bookingType,
         uint256 sessionTime
     ) external onlyRole(BOOKING_MANAGER_ROLE) {
         if (escrows[bookingId].active) revert EscrowAlreadyExists();
@@ -194,34 +182,30 @@ contract Vault is ReentrancyGuard, AccessControl {
         if (sessionTime <= block.timestamp) revert SessionNotInFuture();
         if (sessionTime > block.timestamp + 30 days) revert SessionTooFar();
 
-        // Calculate fee splits based on booking type
-        (uint256 mentorAmount, uint256 platformFeeAmount, uint256 menteeRefundAmount) =
-            _calculateFeeSplit(bookingType, amount);
-
+        // For COMMITMENT_FEE: Initially 0%, will be set based on attendance
         // Transfer tokens from mentee to vault
         paymentToken.safeTransferFrom(msg.sender, address(this), amount);
 
         // Store escrow data
         escrows[bookingId] = BookingEscrow({
             amount: amount,
-            mentorAmount: mentorAmount,
-            platformFee: platformFeeAmount,
-            menteeRefund: menteeRefundAmount,
+            mentorAmount: 0,
+            platformFee: 0,
+            menteeRefund: 0,
             sessionTime: sessionTime,
             mentee: mentee,
             mentor: mentor,
             claimed: false,
-            active: true,
-            bookingType: bookingType
+            active: true
         });
 
         totalEscrowed += amount;
 
-        emit EscrowCreated(bookingId, mentee, mentor, amount, bookingType);
+        emit EscrowCreated(bookingId, mentee, mentor, amount);
     }
 
     /**
-     * @dev Releases payment to mentor (for PAID bookings or no-shows)
+     * @dev Releases payment to mentor (for no-shows or after session completion)
      * @param bookingId Booking identifier
      */
     function releaseToMentor(uint256 bookingId) external nonReentrant {
@@ -246,7 +230,7 @@ contract Vault is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @dev Refunds payment to mentee (for COMMITMENT_FEE with attendance)
+     * @dev Refunds payment to mentee (after attendance confirmation)
      * @param bookingId Booking identifier
      */
     function refundToMentee(uint256 bookingId) external nonReentrant {
@@ -257,7 +241,6 @@ contract Vault is ReentrancyGuard, AccessControl {
             msg.sender != escrow.mentee &&
             !hasRole(BOOKING_MANAGER_ROLE, msg.sender)
         ) revert NotMentee();
-        if (escrow.bookingType != BookingType.COMMITMENT_FEE) revert WrongBookingType();
 
         escrow.claimed = true;
         uint256 amountToTransfer = escrow.menteeRefund;
@@ -424,7 +407,6 @@ contract Vault is ReentrancyGuard, AccessControl {
         BookingEscrow storage escrow = escrows[bookingId];
         return escrow.active &&
             !escrow.claimed &&
-            escrow.bookingType == BookingType.COMMITMENT_FEE &&
             escrow.menteeRefund > 0;
     }
 
@@ -438,32 +420,7 @@ contract Vault is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @dev Calculates fee split based on booking type
-     * @param bookingType Type of booking
-     * @param amount Total amount
-     * @return mentorAmount Amount for mentor
-     * @return platformFeeAmount Platform fee
-     * @return menteeRefundAmount Refund to mentee
-     */
-    function _calculateFeeSplit(
-        BookingType bookingType,
-        uint256 amount
-    ) internal pure returns (uint256 mentorAmount, uint256 platformFeeAmount, uint256 menteeRefundAmount) {
-        if (bookingType == BookingType.PAID) {
-            // PAID: 95% to mentor, 5% to platform
-            mentorAmount = (amount * (100 - PLATFORM_FEE_PERCENT_PAID)) / 100;
-            platformFeeAmount = (amount * PLATFORM_FEE_PERCENT_PAID) / 100;
-            menteeRefundAmount = 0;
-        } else {
-            // COMMITMENT_FEE: Initially 0%, will be set based on attendance
-            mentorAmount = 0;
-            platformFeeAmount = 0;
-            menteeRefundAmount = 0;
-        }
-    }
-
-    /**
-     * @dev Updates mentee refund amount (for COMMITMENT_FEE after attendance)
+     * @dev Updates mentee refund amount (after attendance confirmation)
      * @param bookingId Booking identifier
      * @param newMenteeRefund New refund amount
      */
@@ -474,14 +431,13 @@ contract Vault is ReentrancyGuard, AccessControl {
         BookingEscrow storage escrow = escrows[bookingId];
         if (!escrow.active) revert EscrowNotActive();
         if (escrow.claimed) revert EscrowAlreadyClaimed();
-        if (escrow.bookingType != BookingType.COMMITMENT_FEE) revert WrongBookingType();
         if (newMenteeRefund > escrow.amount) revert RefundExceedsAmount();
 
         escrow.menteeRefund = newMenteeRefund;
     }
 
     /**
-     * @dev Updates mentor amount (for COMMITMENT_FEE after no-show)
+     * @dev Updates mentor amount (for no-show)
      * @param bookingId Booking identifier
      * @param newMentorAmount New mentor amount
      */
@@ -492,7 +448,6 @@ contract Vault is ReentrancyGuard, AccessControl {
         BookingEscrow storage escrow = escrows[bookingId];
         if (!escrow.active) revert EscrowNotActive();
         if (escrow.claimed) revert EscrowAlreadyClaimed();
-        if (escrow.bookingType != BookingType.COMMITMENT_FEE) revert WrongBookingType();
         if (newMentorAmount > escrow.amount) revert AmountExceedsEscrowForMentor();
         if (newMentorAmount + escrow.menteeRefund > escrow.amount) revert AmountExceedsEscrowForMentor();
 
